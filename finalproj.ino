@@ -40,7 +40,7 @@ volatile unsigned char *pinE = (unsigned char *) 0x2C;
 // #define WATER_LEVEL_SIGNAL_PIN 
 const int stepsPerRevolution = 2038;
 // Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
-enum State {DISABLED, IDLE, ERROR, RUNNING};
+enum State {DISABLED, IDLE, ERROR, RUNNING} state;
 unsigned int startButton = 0;
 unsigned int monitorWater = 0;
 unsigned int monitorTemp = 0;
@@ -76,17 +76,17 @@ void setup(){
   // setup the timer
   setup_timer_regs();
   // setup the start button ISR
-  attachInterrupt(digitalPinToInterrupt(2), ISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(2), start_button, RISING);
   // setup the stop button ISR
-  attachInterrupt(digitalPinToInterrupt(3), ISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(3), stop_button, RISING);
   // setup the reset button ISR
-  attachInterrupt(digitalPinToInterrupt(18), ISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(18), reset_button, RISING);
   // setup the tempup button ISR
-  attachInterrupt(digitalPinToInterrupt(19), ISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(19), tempup_button, RISING);
   // setup the tempdown button ISR
-  attachInterrupt(digitalPinToInterrupt(20), ISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(20), tempdown_button, RISING);
   // setup the togglevent button ISR
-  attachInterrupt(digitalPinToInterrupt(21), ISR, RISING);
+  attachInterrupt(digitalPinToInterrupt(21), togglevent_button, RISING);
 
 
   // set PB6 to input
@@ -101,9 +101,6 @@ void setup(){
 }
 
 void loop(){
-  if (*pinE & 0x10){
-    U0puts("Start Button Pressed\n");
-  }
   /*
   set power_pin high
   delay 10ms
@@ -163,7 +160,10 @@ ISR(TIMER1_OVF_vect){
 }
 // Start Button ISR
 void start_button(){
-  U0puts("Start Button Pressed\n");
+  state = RUNNING;
+  print_state();
+  state = IDLE;
+  print_state();
 }
 // Stop Button ISR
 void stop_button(){
@@ -184,6 +184,23 @@ void tempdown_button(){
 // Toggle Vent Button ISR
 void togglevent_button(){
   U0puts("Toggle Vent Button Pressed\n");
+}
+
+void print_state(){
+  switch(state){
+    case DISABLED:
+      U0puts("DISABLED\n");
+      break;
+    case IDLE:
+      U0puts("IDLE\n");
+      break;
+    case ERROR:
+      U0puts("ERROR\n");
+      break;
+    case RUNNING:
+      U0puts("RUNNING\n");
+      break;
+  }
 }
 
 void adc_init(){
