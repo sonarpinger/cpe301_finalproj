@@ -6,6 +6,7 @@ Date: 4/23/2024
 
 #include <LiquidCrystal.h>
 #include <Stepper.h>
+#include <dht.h>
 
 // UART Pointers
 volatile unsigned char *myUCSR0A = (unsigned char *)0x00C0;
@@ -28,9 +29,19 @@ volatile unsigned char *myTIFR1 = (unsigned char *) 0x36;
 // Port Pointers
 
 // Global Parameters
+#define DHT11_PIN 
+#define WATER_LEVEL_POWER_PIN 
+#define WATER_LEVEL_SIGNAL_PIN 
 const int stepsPerRevolution = 2038;
 Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
 enum State {DISABLED, IDLE, ERROR, RUNNING};
+unsigned int startButton = 0;
+unsigned int monitorWater = 0;
+unsigned int monitorTemp = 0;
+unsigned int monitorHumidity = 0;
+unsigned int monitorVent = 0;
+unsigned int water_level_val;
+dht DHT;
 
 /*
 State Descriptions:
@@ -47,9 +58,31 @@ void setup(){
   U0init(9600);
   // setup the ADC
   adc_init();
+  // setup the timer
+  setup_timer_regs();
+
+  /*
+  set water_level_power_pin to output
+  set water_level_signal_pin to input
+  set power_pin low
+  */
 }
 
 void loop(){
+  /*
+  set power_pin high
+  delay 10ms
+  read water_level_signal_pin
+  set power_pin low
+  print water_level_signal_pin to UART
+  */
+
+  // int chk = DHT.read11(DHT11_PIN);
+  // U0puts("\nTemperature = ");
+  // U0puts(DHT.temperature);
+  // U0puts("\nHumidity = ");
+  // U0puts(DHT.humidity);
+
   // // check if the start button is pressed
   // if(*myPIND & 0x04){
   //   // check if the system is in the disabled state
@@ -67,6 +100,53 @@ void loop(){
   //     U0putchar('T');
 }
 
+// Timer setup function
+void setup_timer_regs(){
+  // setup the timer control registers
+  *myTCCR1A= 0x00;
+  *myTCCR1B= 0X00;
+  *myTCCR1C= 0x00;
+  // reset the TOV flag
+  *myTIFR1 |= 0x01;
+  // enable the TOV interrupt
+  *myTIMSK1 |= 0x01;
+}
+// TIMER OVERFLOW ISR
+ISR(TIMER1_OVF_vect){
+  // stop the timer
+  *myTCCR1B &= 0xF8;
+  // Load the Count
+  *myTCNT1 =  (unsigned int) (65535 - (unsigned long) (currentTicks));
+  //*myTCNT1 =  (unsigned int) (currentTicks);
+  // Start the Timer
+  *myTCCR1B |= 0b00000001;
+  // if it's not the STOP amount
+  if(currentTicks != 65535)
+  {
+    // XOR to toggle PB6
+    *portB ^= 0x40;
+  }
+}
+// Start Button ISR
+ISR(PCINT2_vect){
+  // check if the start button is pressed
+  if(*myPIND & 0x04){
+    // check if the system is in the disabled state
+    if(state == DISABLED){
+      // change the state to idle
+      state = IDLE;
+      // turn off the yellow LED
+      *myPORTB &= 0b11111011;
+      // turn on the green LED
+      *myPORTB |= 0b00000100;
+      // report the state transition
+      U0putchar('D');
+      U0putchar('I');
+      U0putchar(' ');
+      U0putchar('T');
+    }
+  }
+}
 void adc_init(){
   // setup the A register
   *my_ADCSRA |= 0b10000000; // set bit   7 to 1 to enable the ADC
@@ -104,7 +184,6 @@ unsigned int adc_read(unsigned char adc_channel_num){
   // return the result in the ADC data register
   return *my_ADC_DATA;
 }
-
 void U0init(int U0baud){
  unsigned long FCPU = 16000000;
  unsigned int tbaud;
@@ -124,3 +203,10 @@ unsigned char U0getchar(){
 void U0putchar(unsigned char U0pdata){
   while((*myUCSR0A & TBE)==0);
   *myUDR0 = U0pdata;
+}
+// Function to send an entire string to the UART
+void U0puts(char *U0pstr){
+  while(*U0pstr){
+    U0putchar(*U0pstr++);
+  }
+}
