@@ -7,8 +7,30 @@ Date: 4/23/2024
 #include <LiquidCrystal.h>
 #include <Stepper.h>
 
+// UART Pointers
+volatile unsigned char *myUCSR0A = (unsigned char *)0x00C0;
+volatile unsigned char *myUCSR0B = (unsigned char *)0x00C1;
+volatile unsigned char *myUCSR0C = (unsigned char *)0x00C2;
+volatile unsigned int  *myUBRR0  = (unsigned int *) 0x00C4;
+volatile unsigned char *myUDR0   = (unsigned char *)0x00C6;
+// ADC Pointers
+volatile unsigned char* my_ADMUX = (unsigned char*) 0x7C;
+volatile unsigned char* my_ADCSRB = (unsigned char*) 0x7B;
+volatile unsigned char* my_ADCSRA = (unsigned char*) 0x7A;
+volatile unsigned int* my_ADC_DATA = (unsigned int*) 0x78;
+// Timer Pointers
+volatile unsigned char *myTCCR1A = (unsigned char *) 0x80;
+volatile unsigned char *myTCCR1B = (unsigned char *) 0x81;
+volatile unsigned char *myTCCR1C = (unsigned char *) 0x82;
+volatile unsigned char *myTIMSK1 = (unsigned char *) 0x6F;
+volatile unsigned int *myTCNT1 = (unsigned int *) 0x84;
+volatile unsigned char *myTIFR1 = (unsigned char *) 0x36;
+// Port Pointers
+
+// Global Parameters
 const int stepsPerRevolution = 2038;
 Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
+enum State {DISABLED, IDLE, ERROR, RUNNING};
 
 /*
 State Descriptions:
@@ -19,8 +41,6 @@ IDLE: green led on, exact timestamp records transition times, water level is mon
 ERROR: motor does not start automatically, reset button triggers change to IDLE state iff water level is above threshold, error message displayed on LCD, red led
 RUNNING: fan motor on, transistion to idle on temp drop below thresh, transition to error if water level becomes to low, blue led is on
 */
-
-enum State {DISABLED, IDLE, ERROR, RUNNING};
 
 void setup(){
   // setup the UART
