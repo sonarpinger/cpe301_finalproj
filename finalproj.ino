@@ -41,7 +41,7 @@ unsigned int monitorTemp = 0;
 unsigned int monitorHumidity = 0;
 unsigned int monitorVent = 0;
 unsigned int water_level_val;
-unsigned int one_minute_counter = 57;
+unsigned int one_minute_counter = 0;
 // dht DHT;
 
 /*
@@ -105,7 +105,7 @@ void loop(){
 void setup_timer_regs(){
   // setup the timer control registers
   *myTCCR1A= 0x00;
-  *myTCCR1B = 0x04; // set the prescaler to 256
+  *myTCCR1B = 0x05; // set the prescaler to 256
   *myTCCR1C= 0x00;
   // reset the TOV flag
   *myTIFR1 |= 0x01;
@@ -117,11 +117,15 @@ ISR(TIMER1_OVF_vect){
   // stop the timer
   *myTCCR1B &= 0xF8;
   // Load the Count
-  *myTCNT1 = one_minute_counter; // 57 counts each taking 1.048576 seconds to reach 60 seconds
-  //*myTCNT1 =  (unsigned int) (currentTicks);
+  *myTCNT1 = 0;
   // Start the Timer
   *myTCCR1B |= 0b00000001;
-  U0puts("1 minute has passed\n");
+  // increment the one minute counter
+  one_minute_counter++;
+  if (one_minute_counter == 12000){
+    U0puts("1 minute has passed\n");
+    one_minute_counter = 0;
+  }
 }
 // Start Button ISR
 // ISR(PCINT2_vect){
