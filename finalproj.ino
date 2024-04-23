@@ -4,9 +4,9 @@ Team Members: Brandon Ramirez, Austin Parkerson, Robert Fleming
 Date: 4/23/2024
 */
 
-#include <LiquidCrystal.h>
-#include <Stepper.h>
-#include <dht.h>
+// #include <LiquidCrystal.h>
+// #include <Stepper.h>
+// #include <dht.h>
 
 // UART Pointers
 volatile unsigned char *myUCSR0A = (unsigned char *)0x00C0;
@@ -29,11 +29,11 @@ volatile unsigned char *myTIFR1 = (unsigned char *) 0x36;
 // Port Pointers
 
 // Global Parameters
-#define DHT11_PIN 
-#define WATER_LEVEL_POWER_PIN 
-#define WATER_LEVEL_SIGNAL_PIN 
+// #define DHT11_PIN 
+// #define WATER_LEVEL_POWER_PIN 
+// #define WATER_LEVEL_SIGNAL_PIN 
 const int stepsPerRevolution = 2038;
-Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
+// Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
 enum State {DISABLED, IDLE, ERROR, RUNNING};
 unsigned int startButton = 0;
 unsigned int monitorWater = 0;
@@ -41,7 +41,8 @@ unsigned int monitorTemp = 0;
 unsigned int monitorHumidity = 0;
 unsigned int monitorVent = 0;
 unsigned int water_level_val;
-dht DHT;
+unsigned int one_minute_counter = 57;
+// dht DHT;
 
 /*
 State Descriptions:
@@ -100,53 +101,48 @@ void loop(){
   //     U0putchar('T');
 }
 
-// Timer setup function
+// Timer setup function (1 minute)
 void setup_timer_regs(){
   // setup the timer control registers
   *myTCCR1A= 0x00;
-  *myTCCR1B= 0X00;
+  *myTCCR1B = 0x04; // set the prescaler to 256
   *myTCCR1C= 0x00;
   // reset the TOV flag
   *myTIFR1 |= 0x01;
   // enable the TOV interrupt
   *myTIMSK1 |= 0x01;
 }
-// TIMER OVERFLOW ISR
+// TIMER OVERFLOW ISR (1 minute)
 ISR(TIMER1_OVF_vect){
   // stop the timer
   *myTCCR1B &= 0xF8;
   // Load the Count
-  *myTCNT1 =  (unsigned int) (65535 - (unsigned long) (currentTicks));
+  *myTCNT1 = one_minute_counter; // 57 counts each taking 1.048576 seconds to reach 60 seconds
   //*myTCNT1 =  (unsigned int) (currentTicks);
   // Start the Timer
   *myTCCR1B |= 0b00000001;
-  // if it's not the STOP amount
-  if(currentTicks != 65535)
-  {
-    // XOR to toggle PB6
-    *portB ^= 0x40;
-  }
+  U0puts("1 minute has passed\n");
 }
 // Start Button ISR
-ISR(PCINT2_vect){
-  // check if the start button is pressed
-  if(*myPIND & 0x04){
-    // check if the system is in the disabled state
-    if(state == DISABLED){
-      // change the state to idle
-      state = IDLE;
-      // turn off the yellow LED
-      *myPORTB &= 0b11111011;
-      // turn on the green LED
-      *myPORTB |= 0b00000100;
-      // report the state transition
-      U0putchar('D');
-      U0putchar('I');
-      U0putchar(' ');
-      U0putchar('T');
-    }
-  }
-}
+// ISR(PCINT2_vect){
+//   // check if the start button is pressed
+//   if(*myPIND & 0x04){
+//     // check if the system is in the disabled state
+//     if(state == DISABLED){
+//       // change the state to idle
+//       state = IDLE;
+//       // turn off the yellow LED
+//       *myPORTB &= 0b11111011;
+//       // turn on the green LED
+//       *myPORTB |= 0b00000100;
+//       // report the state transition
+//       U0putchar('D');
+//       U0putchar('I');
+//       U0putchar(' ');
+//       U0putchar('T');
+//     }
+//   }
+// }
 void adc_init(){
   // setup the A register
   *my_ADCSRA |= 0b10000000; // set bit   7 to 1 to enable the ADC
@@ -195,13 +191,14 @@ void U0init(int U0baud){
  *myUBRR0  = tbaud;
 }
 unsigned char U0kbhit(){
-  return *myUCSR0A & RDA;
+  return (*myUCSR0A & (1 << 7));
 }
-unsigned char U0getchar(){
+unsigned char getChar(){
+  while(!(*myUCSR0A & (1 << 7)));
   return *myUDR0;
 }
 void U0putchar(unsigned char U0pdata){
-  while((*myUCSR0A & TBE)==0);
+  while(!(*myUCSR0A & (1 << 5)));
   *myUDR0 = U0pdata;
 }
 // Function to send an entire string to the UART
