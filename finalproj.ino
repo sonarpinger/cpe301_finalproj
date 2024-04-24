@@ -6,7 +6,8 @@ Date: 4/23/2024
 
 // #include <LiquidCrystal.h>
 // #include <Stepper.h>
-// #include <dht.h>
+#include <dht.h>
+#include <RTClib.h>
 
 // UART Pointers
 volatile unsigned char *myUCSR0A = (unsigned char *)0x00C0;
@@ -35,7 +36,10 @@ volatile unsigned char *portE = (unsigned char *) 0x2E;
 volatile unsigned char *pinE = (unsigned char *) 0x2C;
 
 // Global Parameters
-// #define DHT11_PIN 
+dht DHT;
+RTC_DS1307 rtc;
+
+#define DHT11_PIN 10
 // #define WATER_LEVEL_POWER_PIN 
 // #define WATER_LEVEL_SIGNAL_PIN 
 const int stepsPerRevolution = 2038;
@@ -43,13 +47,15 @@ const int stepsPerRevolution = 2038;
 enum State {DISABLED, IDLE, ERROR, RUNNING} state;
 unsigned int startButton = 0;
 unsigned int monitorWater = 0;
+unsigned int triggerWaterRead = 0;
 unsigned int monitorTemp = 0;
+unsigned int triggerTempRead = 0;
 unsigned int monitorHumidity = 0;
+unsigned int triggerHumiRead = 0;
 unsigned int monitorVent = 0;
 unsigned int water_level_val;
 unsigned int one_minute_counter = 0;
-// dht DHT;
-
+unsigned int triggerGetTime = 0;
 
 // Start Button = Digital Pin 2, PE4
 // Stop Button = Digital Pin 3, PE5
@@ -80,27 +86,59 @@ void setup(){
   // setup the stop button ISR
   attachInterrupt(digitalPinToInterrupt(3), stop_button, RISING);
   // setup the reset button ISR
-  attachInterrupt(digitalPinToInterrupt(18), reset_button, RISING);
-  // setup the tempup button ISR
-  attachInterrupt(digitalPinToInterrupt(19), tempup_button, RISING);
-  // setup the tempdown button ISR
-  attachInterrupt(digitalPinToInterrupt(20), tempdown_button, RISING);
-  // setup the togglevent button ISR
-  attachInterrupt(digitalPinToInterrupt(21), togglevent_button, RISING);
+  // attachInterrupt(digitalPinToInterrupt(18), reset_button, RISING);
+  // // setup the tempup button ISR
+  // attachInterrupt(digitalPinToInterrupt(19), tempup_button, RISING);
+  // // setup the tempdown button ISR
+  // attachInterrupt(digitalPinToInterrupt(20), tempdown_button, RISING);
+  // // setup the togglevent button ISR
+  // attachInterrupt(digitalPinToInterrupt(21), togglevent_button, RISING);
 
+  // check for RTC
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+  // check for RTC time
+  if (! rtc.isrunning()) {
+    Serial.println("RTC is NOT running!");
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+  U0puts("RTC is running\n");
 
-  // set PB6 to input
+  // set PB6 to input; digital pin 12
   *portDDRB &= 0b10111111;
-  // set PE4 to input
+  // set PE4 to input; digital pin 2
   *portDDRE &= 0b11101111;
-  /*
-  set water_level_power_pin to output
-  set water_level_signal_pin to input
-  set power_pin low
-  */
+  // set PE5 to input; digital pin 3
+  *portDDRE &= 0b11011111;
+  // set monitorWater to true
+  monitorWater = 1;
+  // set monitorTemp to true
+  monitorTemp = 1;
+  // set monitorHumidity to true
+  monitorHumidity = 1;
+
 }
 
 void loop(){
+  if (triggerGetTime){
+    get_time();
+    triggerGetTime = 0;
+  }
+  if (triggerWaterRead){
+    get_water_level();
+    triggerWaterRead = 0;
+  }
+  if (triggerTempRead){
+    get_temperature();
+    triggerTempRead = 0;
+  }
+  if (triggerHumiRead){
+    get_humidity();
+    triggerHumiRead = 0;
+  }
   /*
   set power_pin high
   delay 10ms
@@ -153,10 +191,61 @@ ISR(TIMER1_OVF_vect){
   *myTCCR1B |= 0b00000001;
   // increment the one minute counter
   one_minute_counter++;
-  if (one_minute_counter == 12000){
-    U0puts("1 minute has passed\n");
+  // one_minute_counter = 14400 for 1 minute
+  // one_minute_counter = 1200 for 5 seconds
+  if (one_minute_counter == 1200){
     one_minute_counter = 0;
+    triggerGetTime = 1;
+    if (monitorTemp){
+      triggerTempRead = 1;
+    }
+    if (monitorHumidity){
+      triggerHumiRead = 1;
+    }
+    if (monitorWater){
+      triggerWaterRead = 1;
+    }
   }
+}
+void get_time(){
+  DateTime now = rtc.now();
+  unsigned char snum[8] = {0};
+  U0puts("Time: ");
+  sprintf(snum, "%02d:%02d:%02d\n", now.hour(), now.minute(), now.second());
+  U0puts(snum);
+}
+void get_temperature(){
+  int chk = DHT.read11(DHT11_PIN);
+  unsigned char snum[6] = {0};
+  U0puts("Temperature = ");
+  int temp = (int) DHT.temperature;
+  sprintf(snum, "%d\n", temp);
+  U0puts(snum);
+}
+void get_humidity(){
+  int chk = DHT.read11(DHT11_PIN);
+  unsigned char snum[6] = {0};
+  U0puts("Humidity = ");
+  int humidity = (int) DHT.humidity;
+  sprintf(snum, "%d\n", humidity);
+  U0puts(snum);
+}
+void get_water_level(){
+  // result of the water level signal
+  unsigned char snum[6] = {0};
+  // set the power pin high (PB6)
+  *portB |= 0b01000000;
+  // delay 10ms
+  //delay(100);
+  // read the water level signal pin
+  water_level_val = adc_read(0);
+  // set the power pin low
+  *portB &= 0b10111111;
+  // print the water level signal to the UART
+  sprintf(snum, "%d", water_level_val);
+  U0puts("Water Level: ");
+  U0puts(snum);
+  U0puts("\n");
 }
 // Start Button ISR
 void start_button(){
@@ -185,7 +274,6 @@ void tempdown_button(){
 void togglevent_button(){
   U0puts("Toggle Vent Button Pressed\n");
 }
-
 void print_state(){
   switch(state){
     case DISABLED:
@@ -203,6 +291,12 @@ void print_state(){
   }
 }
 
+
+
+
+
+
+// ******************************************************************************************************************************************
 void adc_init(){
   // setup the A register
   *my_ADCSRA |= 0b10000000; // set bit   7 to 1 to enable the ADC
