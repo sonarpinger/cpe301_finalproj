@@ -19,11 +19,11 @@
 
 ## Working Peripherals
 
-- [ ] Status LEDs
+- [x] Status LEDs
 - [ ] Stepper Motor
 - [ ] Status Buttons
-- [ ] LCD Screen
-- [ ] Blower Fan
+- [x] LCD Screen
+- [x] Blower Fan
 
 ## Todo
 
