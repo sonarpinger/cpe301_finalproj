@@ -5,7 +5,7 @@ Date: 4/23/2024
 */
 
 #include <LiquidCrystal.h>
-// #include <Stepper.h>
+#include <Stepper.h>
 #include <dht.h>
 #include <RTClib.h>
 
@@ -43,6 +43,10 @@ volatile unsigned char *pinE = (unsigned char *) 0x2C;
 volatile unsigned char *portDDRG = (unsigned char *) 0x33;
 volatile unsigned char *portG = (unsigned char *) 0x34;
 volatile unsigned char *pinG = (unsigned char *) 0x32;
+volatile unsigned char *portDDRH = (unsigned char *) 0x101;
+volatile unsigned char *portH = (unsigned char *) 0x102;
+volatile unsigned char *pinH = (unsigned char *) 0x100;
+
 
 // Global Parameters
 dht DHT;
@@ -50,22 +54,25 @@ RTC_DS1307 rtc;
 
 #define DHT11_PIN 10
 const int stepsPerRevolution = 2038;
-// Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
+Stepper myStepper = Stepper(stepsPerRevolution, 51, 53, 52, 54);
 const int rs = 42, en = 43, d4 = 44, d5 = 45, d6 = 46, d7 = 47;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-enum State {DISABLED, IDLE, ERROR, RUNNING} state;
+enum State {DISABLED, IDLE, ERROR, RUNNING, UNKNOWN} state;
 unsigned int startButton = 0;
 unsigned int monitorWater = 0;
 unsigned int triggerWaterRead = 0;
-unsigned int monitorTemp = 0;
-unsigned int triggerTempRead = 0;
-unsigned int monitorHumidity = 0;
-unsigned int triggerHumiRead = 0;
-unsigned int monitorVent = 0;
+unsigned int monitorTempandHumi = 0;
+unsigned int triggerTempandHumiRead = 0;
+unsigned int monitorVent = 1;
 unsigned int water_level_val;
 unsigned int one_minute_counter = 0;
 unsigned int triggerGetTime = 0;
-
+unsigned int set_state_to_idle_flag = 0;
+int water_level_threshold = 50;
+int water_level = 0;
+int temp_threshold = 25;
+int temp = 0;
+State prev_state = UNKNOWN; // use placeholder state for initial state
 /*
 PIN ASSIGNMENTS:
 DHT11_PIN: 10
@@ -74,7 +81,7 @@ WATER_LEVEL_SIGNAL_PIN: A0
 START_BUTTON: 2, PE4
 STOP_BUTTON: 3, PE5
 STEPPER MOTOR POSITION CONTROL: A1
-BLOWER MOTOR ON/OFF: 53, PB0
+BLOWER MOTOR ON/OFF: 7, PH4
 RESET BUTTON: 23, PA1
 TEMP UP BUTTON: 25, PA3
 TEMP DOWN BUTTON: 27, PA5
@@ -90,6 +97,12 @@ BLUE LED (RUNNING): 35, PC2
 GREEN LED (IDLE): 37, PC0
 YELLOW LED (DISABLED): 39, PG2
 RED LED (ERROR): 41, PG0
+STEPPER MOTOR PINS {
+  IN1: 51
+  IN2: 52
+  IN3: 53
+  IN4: 54
+}
 */
 
 void setup(){
@@ -103,9 +116,6 @@ void setup(){
   attachInterrupt(digitalPinToInterrupt(2), start_button, RISING);
   // setup the stop button ISR
   attachInterrupt(digitalPinToInterrupt(3), stop_button, RISING);
-  lcd.begin(16, 2);
-  lcd.setCursor(0, 1);
-  lcd.print("Hello World!");
 
   // check for RTC
   if (! rtc.begin()) {
@@ -143,10 +153,19 @@ void setup(){
   // set PB0 to output; digital pin 53: blower motor on/off
   *portDDRB |= 0b00000001;
 
-  // set the state to disabled initially
+  // set the state to be disabled initially
   state = DISABLED;
   print_state();
   get_time();
+  // set the stepper motor to the initial position
+  myStepper.setSpeed(60);
+  myStepper.step(stepsPerRevolution);
+  // set stepper motor to random position
+  myStepper.step(1000);
+  // set the blower motor to off
+  blower_motor_off();
+
+  lcd.begin(16, 2);
 }
 
 // state logic: DISABLED -> IDLE -> ERROR -> IDLE -> RUNNING -> IDLE -> DISABLED
@@ -160,64 +179,141 @@ ERROR: motor does not start automatically, reset button triggers change to IDLE 
 RUNNING: fan motor on, transistion to idle on temp drop below thresh, transition to error if water level becomes to low, blue led is on
 */
 
+// start in idle state
+
 void loop(){
+  if (state != prev_state){ // check for state change and print time and new state
+    print_state();
+    get_time();
+    prev_state = state;
+  }
   // check the state of the system
   switch (state){
   case DISABLED:
+    // blank_lcd();
     disabled_led_on();
     idle_led_off();
     error_led_off();
     running_led_off();
-    monitorHumidity = 0;
-    monitorTemp = 0;
-    monitorWater = 0;
+    monitorTempandHumi = 0;
+    monitorWater = 1;
+    monitorVent = 1;
+    blower_motor_off();
     break;
   case IDLE:
+    // blank_lcd();
     disabled_led_off();
     idle_led_on();
     error_led_off();
     running_led_off();
-    monitorHumidity = 1;
-    monitorTemp = 1;
+    blower_motor_off();
+    monitorTempandHumi = 1;
     monitorWater = 1;
+    monitorVent = 1;
+    if (water_level_val < water_level_threshold){
+      state = ERROR; // water level too low
+      U0puts("ERROR: Water Level Too Low\n");
+      unsigned char snum[6] = {0};
+      sprintf(snum, "%d", water_level_val);
+      U0puts(snum);
+      blank_lcd();
+      lcd.setCursor(0, 0);
+      lcd.print("ERROR: Water Level");
+      lcd.setCursor(0, 1);
+      lcd.print("Too Low");
+    }
+    if (temp >= temp_threshold){
+      U0puts("Temp: ");
+      U0puts("OK\n");
+      state = RUNNING; // temp too high
+    }
     break;
   case ERROR:
+    // blank_lcd();
     disabled_led_off();
     idle_led_off();
     error_led_on();
     running_led_off();
-    monitorHumidity = 0;
-    monitorTemp = 0;
-    monitorWater = 0;
+    blower_motor_off();
+    monitorTempandHumi = 0;
+    monitorWater = 1;
+    monitorVent = 0;
+    if (water_level_val >= water_level_threshold){
+      U0puts("Water Level: ");
+      U0puts("OK\n");
+      state = IDLE;
+      blank_lcd();
+    }
     break;
   case RUNNING:
+    // blank_lcd();
     disabled_led_off();
     idle_led_off();
     error_led_off();
     running_led_on();
-    monitorHumidity = 1;
-    monitorTemp = 1;
+    blower_motor_on();
+    monitorTempandHumi = 1;
+    monitorVent = 1;
     monitorWater = 1;
+    if (water_level_val < water_level_threshold){
+      state = ERROR; // water level too low
+      U0puts("Water Level: ");
+      U0puts("Too Low\n");
+      blank_lcd();
+      lcd.setCursor(0, 0);
+      lcd.print("ERROR: Water Level");
+      lcd.setCursor(0, 1);
+      lcd.print("Too Low");
+    }
+    if (temp < temp_threshold){
+      U0puts("Temp: ");
+      U0puts("Too Low\n");
+      state = IDLE; // temp too low
+    }
     break;
   default:
     break;
   }
-
   if (triggerGetTime){
     get_time();
     triggerGetTime = 0;
   }
-  if (triggerWaterRead){
+  if (monitorWater){
     get_water_level();
-    triggerWaterRead = 0;
+    // triggerWaterRead = 0;
   }
-  if (triggerTempRead){
-    get_temperature();
-    triggerTempRead = 0;
+  if (triggerTempandHumiRead){
+    get_temperature_and_humidity();
+    triggerTempandHumiRead = 0;
   }
-  if (triggerHumiRead){
-    get_humidity();
-    triggerHumiRead = 0;
+  // if (monitorVent){
+  //   // check the state of the vent control
+  //   int vent_posit = adc_read(1);
+  //   if (vent_posit > 512){
+  //     myStepper.step(100);
+  //   } else {
+  //     myStepper.step(-100);
+  //   }
+  // }
+  if (set_state_to_idle_flag){
+    U0puts("Start Button Pressed\n");
+    state = IDLE;
+    set_state_to_idle_flag = 0;
+  }
+  // reset button
+  if (*pinA & 0b00000010){
+    print_state();
+    if (state == ERROR){
+      state = IDLE;
+    }
+  }
+  // temp up button
+  if (*pinA & 0b00001000){
+    temp_threshold++;
+  }
+  // temp down button
+  if (*pinA & 0b00100000){
+    temp_threshold--;
   }
 }
 // TIMER OVERFLOW ISR (1 minute)
@@ -235,19 +331,16 @@ ISR(TIMER1_OVF_vect){
   if (one_minute_counter == 1200){ // in 5 seconds mode for testing
     one_minute_counter = 0;
     triggerGetTime = 1;
-    if (monitorTemp){
-      triggerTempRead = 1;
+    if (monitorTempandHumi){
+      triggerTempandHumiRead = 1;
     }
-    if (monitorHumidity){
-      triggerHumiRead = 1;
-    }
-    if (monitorWater){
-      triggerWaterRead = 1;
-    }
+    // if (monitorWater){
+    //   triggerWaterRead = 1;
+    // }
   }
 }
 void get_time(){
-  print_state();
+  // print_state();
   DateTime now = rtc.now();
   unsigned char snum[8] = {0};
   U0puts("Time: ");
@@ -265,50 +358,46 @@ void display_time(){
   lcd.print(now.second());
   lcd.setCursor(0, 1);
 }
-void get_temperature(){
+void get_temperature_and_humidity(){
+  blank_lcd();
   int chk = DHT.read11(DHT11_PIN);
-  unsigned char snum[6] = {0};
-  U0puts("Temperature = ");
-  int temp = (int) DHT.temperature;
-  sprintf(snum, "%d\n", temp);
-  U0puts(snum);
-}
-void get_humidity(){
-  int chk = DHT.read11(DHT11_PIN);
-  unsigned char snum[6] = {0};
-  U0puts("Humidity = ");
+  temp = (int) DHT.temperature;
   int humidity = (int) DHT.humidity;
-  sprintf(snum, "%d\n", humidity);
-  U0puts(snum);
+  lcd.setCursor(1, 0);
+  lcd.print("Temp: ");
+  lcd.print(temp);
+  lcd.print("C");
+  // set the cursor to the second line
+  lcd.setCursor(0, 1);
+  lcd.print(" Humidity: ");
+  lcd.print(humidity);
+  lcd.print("%");
 }
 void get_water_level(){
   // result of the water level signal
   unsigned char snum[6] = {0};
   // set the power pin high (PB6)
   *portB |= 0b01000000;
-  // delay 10ms
-  //delay(100);
   // read the water level signal pin
   water_level_val = adc_read(0);
   // set the power pin low
   *portB &= 0b10111111;
   // print the water level signal to the UART
-  sprintf(snum, "%d", water_level_val);
-  U0puts("Water Level: ");
-  U0puts(snum);
-  U0puts("\n");
+  // sprintf(snum, "%d", water_level_val);
+  // U0puts("Water Level: ");
+  // U0puts(snum);
+  // U0puts("\n");
 }
 // Start Button ISR
 void start_button(){
-  state = RUNNING;
+  // U0puts("Start Button Pressed\n");
+  set_state_to_idle_flag = 1;
+  // state = IDLE;
   // print_state();
-  // get_time();
 }
 // Stop Button ISR
 void stop_button(){
   state = DISABLED;
-  // print_state();
-  // get_time();
 }
 void print_state(){
   switch(state){
@@ -326,7 +415,9 @@ void print_state(){
       break;
   }
 }
-
+void blank_lcd(){
+  lcd.clear();
+}
 
 
 
@@ -422,10 +513,10 @@ void error_led_off(){
   *portG &= 0b11111110;
 }
 void blower_motor_on(){
-  *portB |= 0b00000001;
+  *portH |= 0b00010000;
 }
 void blower_motor_off(){
-  *portB &= 0b11111110;
+  *portH &= 0b11101111;
 }
 // Timer setup function (1 minute)
 void setup_timer_regs(){
