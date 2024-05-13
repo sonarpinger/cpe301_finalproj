@@ -1,5 +1,5 @@
 /*
-Team Name:
+Team Name: hello world 💓
 Team Members: Brandon Ramirez, Austin Parkerson, Robert Fleming
 Date: 4/23/2024
 */
@@ -54,7 +54,7 @@ RTC_DS1307 rtc;
 
 #define DHT11_PIN 10
 const int stepsPerRevolution = 2038;
-Stepper myStepper = Stepper(stepsPerRevolution, 51, 53, 52, 54);
+Stepper myStepper = Stepper(stepsPerRevolution, 50, 51, 52, 53);
 const int rs = 42, en = 43, d4 = 44, d5 = 45, d6 = 46, d7 = 47;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 enum State {DISABLED, IDLE, ERROR, RUNNING, UNKNOWN} state;
@@ -64,13 +64,14 @@ unsigned int triggerWaterRead = 0;
 unsigned int monitorTempandHumi = 0;
 unsigned int triggerTempandHumiRead = 0;
 unsigned int monitorVent = 1;
+unsigned int triggerVentChange = 0;
 unsigned int water_level_val;
 unsigned int one_minute_counter = 0;
 unsigned int triggerGetTime = 0;
 unsigned int set_state_to_idle_flag = 0;
-int water_level_threshold = 50;
+int water_level_threshold = 100;
 int water_level = 0;
-int temp_threshold = 25;
+int temp_threshold = 35;
 int temp = 0;
 State prev_state = UNKNOWN; // use placeholder state for initial state
 /*
@@ -98,10 +99,10 @@ GREEN LED (IDLE): 37, PC0
 YELLOW LED (DISABLED): 39, PG2
 RED LED (ERROR): 41, PG0
 STEPPER MOTOR PINS {
-  IN1: 51
-  IN2: 52
-  IN3: 53
-  IN4: 54
+  IN1: 50
+  IN2: 51
+  IN3: 52
+  IN4: 53
 }
 */
 
@@ -152,20 +153,23 @@ void setup(){
   *portDDRG |= 0b00000001;
   // set PB0 to output; digital pin 53: blower motor on/off
   *portDDRB |= 0b00000001;
+  // set PH4 to output; digital pin 7: stepper motor on/off
+  *portDDRH |= 0b00010000;
+  // set the stepper motor pins to output
+  *portDDRB |= 0b00001111;
 
   // set the state to be disabled initially
   state = DISABLED;
   print_state();
   get_time();
-  // set the stepper motor to the initial position
-  myStepper.setSpeed(60);
-  myStepper.step(stepsPerRevolution);
-  // set stepper motor to random position
-  myStepper.step(1000);
+  myStepper.setSpeed(10);
   // set the blower motor to off
   blower_motor_off();
 
   lcd.begin(16, 2);
+  lcd.setCursor(0, 0);
+  lcd.print("Humidifier");
+
 }
 
 // state logic: DISABLED -> IDLE -> ERROR -> IDLE -> RUNNING -> IDLE -> DISABLED
@@ -183,6 +187,10 @@ RUNNING: fan motor on, transistion to idle on temp drop below thresh, transition
 
 void loop(){
   if (state != prev_state){ // check for state change and print time and new state
+    if (state == IDLE || state == RUNNING){
+      lcd.clear();
+      triggerTempandHumiRead = 1;
+    }
     print_state();
     get_time();
     prev_state = state;
@@ -286,15 +294,21 @@ void loop(){
     get_temperature_and_humidity();
     triggerTempandHumiRead = 0;
   }
-  // if (monitorVent){
-  //   // check the state of the vent control
-  //   int vent_posit = adc_read(1);
-  //   if (vent_posit > 512){
-  //     myStepper.step(100);
-  //   } else {
-  //     myStepper.step(-100);
-  //   }
-  // }
+  if (monitorVent){
+    // check the state of the vent control
+    int vent_posit = adc_read(1);
+    if (vent_posit > 400 && !triggerVentChange){
+      triggerVentChange = 1;
+      myStepper.step(200);
+      U0puts("Opening Vent\n");
+      get_time();
+    } else if (vent_posit < 100 && triggerVentChange){
+      triggerVentChange = 0;
+      myStepper.step(-200);
+      U0puts("Closing Vent\n");
+      get_time();
+    }
+  }
   if (set_state_to_idle_flag){
     U0puts("Start Button Pressed\n");
     state = IDLE;
@@ -328,9 +342,9 @@ ISR(TIMER1_OVF_vect){
   one_minute_counter++;
   // one_minute_counter = 14400 for 1 minute
   // one_minute_counter = 1200 for 5 seconds
-  if (one_minute_counter == 1200){ // in 5 seconds mode for testing
+  if (one_minute_counter == 14400){ // in 5 seconds mode for testing
     one_minute_counter = 0;
-    triggerGetTime = 1;
+    // triggerGetTime = 1; //only during state change and vent control
     if (monitorTempandHumi){
       triggerTempandHumiRead = 1;
     }
@@ -418,10 +432,14 @@ void print_state(){
 void blank_lcd(){
   lcd.clear();
 }
-
-
-
-
+void open_vent(){
+  myStepper.setSpeed(5);
+  myStepper.step(100);
+}
+void close_vent(){
+  myStepper.setSpeed(5);
+  myStepper.step(-100);
+}
 
 // ******************************************************************************************************************************************
 void adc_init(){

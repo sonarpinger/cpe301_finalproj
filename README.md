@@ -2,7 +2,7 @@
 
 ## Group Name
 
-- Example Text
+- hello world 💓
 
 ## Team Members
 
@@ -15,13 +15,12 @@
 - [x] Water level sensor
 - [x] DHT11
 - [x] RTC
-- [ ] Motor position
 
 ## Working Peripherals
 
 - [x] Status LEDs
-- [ ] Stepper Motor
-- [ ] Status Buttons
+- [x] Stepper Motor
+- [x] Status Buttons
 - [x] LCD Screen
 - [x] Blower Fan
 
@@ -29,4 +28,4 @@
 
 - [x] Create outline of program
 - [x] Get sensors and interrupts working
-- [ ] State transition logic
+- [x] State transition logic
